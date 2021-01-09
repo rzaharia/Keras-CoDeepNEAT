@@ -1,0 +1,7 @@
+Keras==2.2.5
+Tensorflow==1.13.1
+Networkx==2.3
+PyDot==1.4.1
+scikit-learn==0.21.3
+matplotlib
+pyspark
