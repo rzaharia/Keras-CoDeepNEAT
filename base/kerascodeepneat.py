@@ -281,7 +281,7 @@ class Individual:
         self.name = name
         self.scores = [0,0]
 
-    def generate(self, save_fig=True, generation=""):
+    def generate(self, save_fig=False, generation=""):
         """
         Returns the keras model representing of the topology.
         """
@@ -412,10 +412,10 @@ class Individual:
         logging.log(21, f"Using input {model_input} and output {layer_map[max(layer_map)][-1]}")
         self.model = keras.models.Model(inputs=model_input, outputs=layer_map[max(layer_map)][-1])
         self.model.compile(**self.compiler)
-        try:
-            plot_model(self.model, to_file=f'{basepath}/images/gen{generation}_blueprint_{self.blueprint.mark}_layer_level_graph_parent1id{self.blueprint.parents[0].mark}_parent2id{self.blueprint.parents[1].mark}.png', show_shapes=True, show_layer_names=True)
-        except:
-            plot_model(self.model, to_file=f'{basepath}/images/gen{generation}_blueprint_{self.blueprint.mark}_layer_level_graph.png', show_shapes=True, show_layer_names=True)
+        # try:
+        #     plot_model(self.model, to_file=f'{basepath}/images/gen{generation}_blueprint_{self.blueprint.mark}_layer_level_graph_parent1id{self.blueprint.parents[0].mark}_parent2id{self.blueprint.parents[1].mark}.png', show_shapes=True, show_layer_names=True)
+        # except:
+        #     plot_model(self.model, to_file=f'{basepath}/images/gen{generation}_blueprint_{self.blueprint.mark}_layer_level_graph.png', show_shapes=True, show_layer_names=True)
 
     def fit(self, input_x, input_y, training_epochs=1, validation_split=0.15, current_generation="", custom_fit_args=None):
         """
@@ -431,7 +431,7 @@ class Individual:
 
         logging.info(f"Fitness for individual {self.name} using blueprint {self.blueprint.mark} after {training_epochs} epochs: {fitness.history}")
 
-        return fitness
+        return fitness 
 
     def score(self, test_x, test_y):
         """
@@ -450,6 +450,13 @@ class Individual:
         logging.info(f"Test scores for individual {self.name} using blueprint {self.blueprint.mark} after training: {scores}")
 
         return scores
+
+    def update_score(self, scores):
+        #Update scores for blueprints (and underlying modules)
+        self.blueprint.update_scores(scores)
+        self.scores = scores
+
+        logging.info(f"Test scores for individual {self.name} using blueprint {self.blueprint.mark} after training: {scores}")
 
     def extract_blueprint(self):
         """
@@ -959,7 +966,7 @@ class Population:
         input_y = self.datasets.training[1][i:i+self.datasets.SAMPLE_SIZE]
         test_x = self.datasets.test[0][j:j+self.datasets.TEST_SAMPLE_SIZE]
         test_y = self.datasets.test[1][j:j+self.datasets.TEST_SAMPLE_SIZE]
-
+ 
         for individual in self.individuals:
             if (self.datasets.custom_fit_args is not None):
                 history = individual.fit(input_x, input_y, training_epochs, validation_split, current_generation=current_generation, custom_fit_args=self.datasets.custom_fit_args)
@@ -976,7 +983,151 @@ class Population:
 
         return iteration
 
-    def iterate_generations(self, generations=1, training_epochs=1, validation_split=0.15, mutation_rate=0.5, crossover_rate=0.2, elitism_rate=0.1, possible_components=None, possible_complementary_components=None):
+    def iterate_fitness_distributed(self, sc, training_epochs=1, validation_split=0.15, current_generation=0):
+        """
+        Fits the individuals in a distributed manner and generates scores.
+
+        returns a list composed of [invidual name, test scores, training history]
+        """       
+
+        logging.info(f"Iterating fitness over {len(self.individuals)} individuals")
+        iteration = []
+
+        #(batch, channels, rows, cols)
+        # Please murder me for this part I deserve it (random.sample doesn't work aaaah!!!)
+        i = random.randint(0,49999-self.datasets.SAMPLE_SIZE)
+        j = random.randint(0,9999-self.datasets.TEST_SAMPLE_SIZE)
+        input_x = self.datasets.training[0][i:i+self.datasets.SAMPLE_SIZE]
+        input_y = self.datasets.training[1][i:i+self.datasets.SAMPLE_SIZE]
+        test_x = self.datasets.test[0][j:j+self.datasets.TEST_SAMPLE_SIZE]
+        test_y = self.datasets.test[1][j:j+self.datasets.TEST_SAMPLE_SIZE]
+
+        if (self.datasets.custom_fit_args is not None):
+            custom_fit_args=self.datasets.custom_fit_args
+        else:
+            custom_fit_args=None
+
+        id_2_individual, id_2_model = {}, {}        
+        for id, individual in enumerate(self.individuals):
+            individual.generate(generation=current_generation)
+            id_2_individual[id] = individual
+            id_2_model[id] = individual.model            
+
+        data = sc.parallelize([([input_x, input_y, test_x, test_y], id_2_model)])
+        data.persist()       
+
+        def map(data, model_id, model, training_epochs, validation_split, current_generation, custom_fit_args):
+            input_x, input_y, test_x, test_y = data[0], data[1], data[2], data[3]
+
+            if custom_fit_args is not None:
+                history = model.fit_generator(**custom_fit_args)
+            else:
+                history = model.fit(input_x, input_y, epochs=training_epochs, validation_split=validation_split, batch_size=128, verbose=2)            
+            scores = model.evaluate(test_x, test_y, verbose=2)
+            return (model_id, model, scores)
+
+        def flat_individuals(data, id_2_models):
+            for model_id, model in id_2_models.items():
+                 yield (data, model_id, model)
+
+        individuals_2_scores = data \
+                                    .flatMap(lambda data_individuals_pairs: flat_individuals(data_individuals_pairs[0], data_individuals_pairs[1])) \
+                                    .map(lambda data_individual_pair: map(data_individual_pair[0], 
+                                                                          data_individual_pair[1], 
+                                                                          data_individual_pair[2], 
+                                                                          training_epochs, 
+                                                                          validation_split, 
+                                                                          current_generation, 
+                                                                          custom_fit_args)).collect()
+                                                                        
+
+        for model_tuple in individuals_2_scores:
+            (id, model, score) = model_tuple
+            individual = id_2_individual[id]
+            individual.model = model
+            individual.update_score(score)
+                        
+            iteration.append([individual.name,
+                    individual.blueprint.mark,
+                    score,
+                    individual.blueprint.get_kmeans_representation(),
+                    (None if individual.blueprint.species == None else individual.blueprint.species.name),
+                    current_generation])
+
+        return iteration
+
+
+    def iterate_fitness_distributed_smarter(self, sc, data_rdd, training_epochs=1, validation_split=0.15, current_generation=0):
+        """
+        Fits the individuals in a distributed manner and generates scores.
+
+        returns a list composed of [invidual name, test scores, training history]
+        """       
+
+        logging.info(f"Iterating fitness over {len(self.individuals)} individuals")
+        iteration = []
+
+        #(batch, channels, rows, cols)
+        # Please murder me for this part I deserve it (random.sample doesn't work aaaah!!!)
+        i = random.randint(0,49999-self.datasets.SAMPLE_SIZE)
+        j = random.randint(0,9999-self.datasets.TEST_SAMPLE_SIZE)
+
+        if (self.datasets.custom_fit_args is not None):
+            custom_fit_args=self.datasets.custom_fit_args
+        else:
+            custom_fit_args=None
+
+        id_2_individual, id_2_model = {}, {}
+        for id, individual in enumerate(self.individuals):
+            individual.generate(generation=current_generation)
+            id_2_individual[id] = individual
+            id_2_model[id] = individual.model            
+
+
+        models_rdd = sc.parallelize([id_2_model])        
+
+        def map(data, model_id, model, training_epochs, validation_split, current_generation, custom_fit_args, i, j, SAMPLE_SIZE, TEST_SAMPLE_SIZE):
+            data_x, data_y, data_text_x, data_text_y = data[0], data[1], data[2], data[3]
+            input_x, input_y, test_x, test_y = data_x[i:i+SAMPLE_SIZE], data_y[i:i+SAMPLE_SIZE], data_text_x[j:j+TEST_SAMPLE_SIZE], data_text_y[j:j+TEST_SAMPLE_SIZE]
+
+            if custom_fit_args is not None:
+                history = model.fit_generator(**custom_fit_args)
+            else:
+                history = model.fit(input_x, input_y, epochs=training_epochs, validation_split=validation_split, batch_size=128, verbose=2)            
+            scores = model.evaluate(test_x, test_y, verbose=2)
+            return (model_id, model, scores)
+
+        def flat_individuals(id_2_models):
+            for model_id, model in id_2_models.items():
+                 yield (model_id, model)
+
+        individuals_2_scores = models_rdd.flatMap(lambda models: flat_individuals(models)) \
+                                         .map(lambda model_id_2_model: map(data_rdd, 
+                                                                           model_id_2_model[0], 
+                                                                           model_id_2_model[1], 
+                                                                           training_epochs, 
+                                                                           validation_split, 
+                                                                           current_generation, 
+                                                                           custom_fit_args)).collect()
+                                                                        
+
+        for model_tuple in individuals_2_scores:
+            (id, model, score) = model_tuple
+            individual = id_2_individual[id]
+            individual.model = model
+            individual.update_score(score)
+                        
+            iteration.append([individual.name,
+                    individual.blueprint.mark,
+                    score,
+                    individual.blueprint.get_kmeans_representation(),
+                    (None if individual.blueprint.species == None else individual.blueprint.species.name),
+                    current_generation])
+
+        return iteration
+
+
+    def iterate_generations(self, generations=1, training_epochs=1, validation_split=0.15, mutation_rate=0.5, crossover_rate=0.2, elitism_rate=0.1, possible_components=None, possible_complementary_components=None, distributed=False, sc=None):
         """
         Manages generation iterations, applying the genetic algorithm in fact.
 
@@ -1003,7 +1154,11 @@ class Population:
             logging.log(21, f"Created individuals for blueprints: {[(item.name, item.blueprint.mark) for item in self.individuals]}")
 
             # Iterate fitness and record the iteration results
-            iteration = self.iterate_fitness(training_epochs, validation_split, current_generation=generation)
+            if distributed:
+                # iteration = self.iterate_fitness_distributed(sc, training_epochs, validation_split, current_generation=generation)
+                iteration = self.iterate_fitness_distributed(sc, training_epochs, validation_split, current_generation=generation)
+            else:
+                iteration = self.iterate_fitness(training_epochs, validation_split, current_generation=generation)
             with open(f"{basepath}iterations.csv", "a", newline="") as csv_history:
                 csv_history_writer = csv.writer(csv_history)
                 csv_history_writer.writerows(iteration)
@@ -1205,7 +1360,7 @@ class GraphOperator:
                                             args = {"possible_components": possible_components,
                                                     "possible_complementary_components": possible_complementary_components})
 
-        self.save_graph_plot(f"module_{name}_{self.count}_module_internal_graph.png", graph)
+        # self.save_graph_plot(f"module_{name}_{self.count}_module_internal_graph.png", graph)
         self.count+=1
         new_module = Module(None, layer_type=layer_type, component_graph=graph)
 
@@ -1251,7 +1406,7 @@ class GraphOperator:
         graph = nx.union(graph, output_node, rename=(None, "output-"))
         graph.add_edge("input-0", "intermed-0")
         graph.add_edge(f"intermed-{max(intermed_graph.nodes())}", "output-0")
-        self.save_graph_plot(f"blueprint_{name}_module_level_graph.png", graph)
+        # self.save_graph_plot(f"blueprint_{name}_module_level_graph.png", graph)
 
         new_blueprint = Blueprint(None, input_shape, module_graph=graph)
 
@@ -1306,8 +1461,8 @@ class GraphOperator:
         new_graph.add_edge(predecessor, node)
         new_graph.add_edge(node, successor)
 
-        if len(leaf_nodes) != 1:
-            return None
+        # if len(leaf_nodes) != 1:
+        #     return None
 
         return new_graph
     

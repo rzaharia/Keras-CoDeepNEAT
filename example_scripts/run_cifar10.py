@@ -1,7 +1,7 @@
 import sys
 sys.path.append("..")
 
-import keras, logging, random, pydot, copy, uuid, os, csv, json
+import keras, logging, random, pydot, copy, uuid, os, csv, json, errno
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -16,6 +16,8 @@ from keras.preprocessing.image import ImageDataGenerator
 from keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger
 from keras import regularizers
 import imp
+
+from pyspark import SparkConf, SparkContext
 
 kerascodeepneat = imp.load_source("kerascodeepneat", "./base/kerascodeepneat.py")
 
@@ -130,6 +132,8 @@ def run_cifar10_full(generations, training_epochs, population_size, blueprint_po
     population.create_blueprint_species(n_blueprint_species)
 
     # Iterate generating, fitting, scoring, speciating, reproducing and mutating.
+    conf = SparkConf().setMaster("local").setAppName("My App").set("spark.driver.memory", "15g")
+    sc = SparkContext(conf=conf)
     iteration = population.iterate_generations(generations=generations,
                                                 training_epochs=training_epochs,
                                                 validation_split=validation_split,
@@ -137,7 +141,8 @@ def run_cifar10_full(generations, training_epochs, population_size, blueprint_po
                                                 crossover_rate=0.2,
                                                 elitism_rate=0.1,
                                                 possible_components=possible_components,
-                                                possible_complementary_components=possible_complementary_components)
+                                                possible_complementary_components=possible_complementary_components,
+                                                distributed=True, sc=sc)
 
     print("Best fitting: (Individual name, Blueprint mark, Scores[test loss, test acc], History).\n", (iteration))
 
