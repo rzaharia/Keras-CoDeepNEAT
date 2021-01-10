@@ -19,9 +19,18 @@ import imp
 
 from pyspark import SparkConf, SparkContext
 
-kerascodeepneat = imp.load_source("kerascodeepneat", "./base/kerascodeepneat.py")
+kerascodeepneat = imp.load_source("kerascodeepneat", "kerascodeepneat.py")
 
-def run_cifar10_full(generations, training_epochs, population_size, blueprint_population_size, module_population_size, n_blueprint_species, n_module_species, final_model_training_epochs):
+def run_cifar10_full(generations, 
+                     training_epochs, 
+                     population_size, 
+                     blueprint_population_size, 
+                     module_population_size, 
+                     n_blueprint_species, 
+                     n_module_species, 
+                     final_model_training_epochs,
+                     SAMPLE_SIZE, 
+                     TEST_SAMPLE_SIZE):
     from keras.datasets import cifar10
 
     #Set parameter tables
@@ -89,8 +98,8 @@ def run_cifar10_full(generations, training_epochs, population_size, blueprint_po
     datagen.fit(x_train)
 
     my_dataset = kerascodeepneat.Datasets(training=[x_train, y_train], test=[x_test, y_test])
-    my_dataset.SAMPLE_SIZE = 20000
-    my_dataset.TEST_SAMPLE_SIZE = 2000
+    my_dataset.SAMPLE_SIZE = SAMPLE_SIZE
+    my_dataset.TEST_SAMPLE_SIZE = TEST_SAMPLE_SIZE
 
     logging.basicConfig(filename='execution.log',
                         filemode='w+', level=logging.INFO,
@@ -111,7 +120,7 @@ def run_cifar10_full(generations, training_epochs, population_size, blueprint_po
     "epochs": training_epochs,
     "verbose": 1,
     "validation_data": (x_test,y_test),
-    "callbacks": [es, csv_logger]
+    "callbacks": [es, csv_logger, mc]
     }                        
     improved_dataset = kerascodeepneat.Datasets(training=[x_train, y_train], test=[x_test, y_test])
     improved_dataset.custom_fit_args = custom_fit_args
@@ -132,7 +141,11 @@ def run_cifar10_full(generations, training_epochs, population_size, blueprint_po
     population.create_blueprint_species(n_blueprint_species)
 
     # Iterate generating, fitting, scoring, speciating, reproducing and mutating.
-    conf = SparkConf().setMaster("local").setAppName("My App").set("spark.driver.memory", "15g")
+    conf = SparkConf().setMaster("local")\
+                      .setAppName("My App")\
+                      .set("spark.driver.memory", "60g")\
+                      .set("spark.driver.maxResultSize", "60g")
+
     sc = SparkContext(conf=conf)
     iteration = population.iterate_generations(generations=generations,
                                                 training_epochs=training_epochs,
@@ -163,15 +176,41 @@ def run_cifar10_full(generations, training_epochs, population_size, blueprint_po
         population.train_full_model(best_model, final_model_training_epochs, validation_split, custom_fit_args)
   
 if __name__ == "__main__":
+    hyperparameters_set = ['original_CoDeepNEAT', 'keras_CoDeepNEAT', 'our_CoDeepNEAT'][2]
 
-    generations = 2
-    training_epochs = 2
-    final_model_training_epochs = 2
-    population_size = 1
-    blueprint_population_size = 10
-    module_population_size = 30
-    n_blueprint_species = 3
-    n_module_species = 3
+    if hyperparameters_set == 'original_CoDeepNEAT':
+        generations = 72
+        training_epochs = 8
+        final_model_training_epochs = 300
+        population_size = 100
+        blueprint_population_size = 25
+        module_population_size = 45
+        n_blueprint_species = 3
+        n_module_species = 3
+        SAMPLE_SIZE = 49998
+        TEST_SAMPLE_SIZE = 7500
+    elif hyperparameters_set == 'keras_CoDeepNEAT':
+        generations = 40
+        training_epochs = 4
+        final_model_training_epochs = 300
+        population_size = 10
+        blueprint_population_size = 10
+        module_population_size = 30
+        n_blueprint_species = 3
+        n_module_species = 3
+        SAMPLE_SIZE = 20000
+        TEST_SAMPLE_SIZE = 2000
+    elif hyperparameters_set == 'our_CoDeepNEAT':
+        generations = 72
+        training_epochs = 5
+        final_model_training_epochs = 300
+        population_size = 20
+        blueprint_population_size = 15
+        module_population_size = 35
+        n_blueprint_species = 3
+        n_module_species = 3
+        SAMPLE_SIZE = 20000
+        TEST_SAMPLE_SIZE = 2000
 
     def create_dir(dir):
         if not os.path.exists(os.path.dirname(dir)):
@@ -184,4 +223,4 @@ if __name__ == "__main__":
     create_dir("models/")
     create_dir("images/")
     
-    run_cifar10_full(generations, training_epochs, population_size, blueprint_population_size, module_population_size, n_blueprint_species, n_module_species, final_model_training_epochs)
+    run_cifar10_full(generations, training_epochs, population_size, blueprint_population_size, module_population_size, n_blueprint_species, n_module_species, final_model_training_epochs, SAMPLE_SIZE, TEST_SAMPLE_SIZE)
