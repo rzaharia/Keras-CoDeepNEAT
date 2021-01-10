@@ -113,7 +113,8 @@ def run_cifar10_full(generations,
 
     # Set configurations for full training session (final training)
     es = EarlyStopping(monitor='val_acc', mode='auto', verbose=1, patience=15)
-    mc = ModelCheckpoint('best_model_checkpoint.h5', monitor='val_accuracy', mode='auto', verbose=1, save_best_only=True)
+    checkpoint_path = os.path.join("gs://", "p3-2020-bucket", "output", 'best_model_checkpoint.h5')
+    mc = ModelCheckpoint(checkpoint_path, monitor='val_accuracy', mode='auto', verbose=1, save_best_only=True)
     csv_logger = CSVLogger('training.csv')
     custom_fit_args = {"generator": datagen.flow(x_train, y_train, batch_size=batch_size),
     "steps_per_epoch": x_train.shape[0] // batch_size,
@@ -201,16 +202,16 @@ if __name__ == "__main__":
         SAMPLE_SIZE = 20000
         TEST_SAMPLE_SIZE = 2000
     elif hyperparameters_set == 'our_CoDeepNEAT':
-        generations = 72
-        training_epochs = 5
-        final_model_training_epochs = 300
-        population_size = 20
+        generations = 2#72
+        training_epochs = 1 #5
+        final_model_training_epochs = 3#00
+        population_size = 2#0
         blueprint_population_size = 15
         module_population_size = 35
         n_blueprint_species = 3
         n_module_species = 3
-        SAMPLE_SIZE = 20000
-        TEST_SAMPLE_SIZE = 2000
+        SAMPLE_SIZE = 200#00
+        TEST_SAMPLE_SIZE = 20#00
 
     def create_dir(dir):
         if not os.path.exists(os.path.dirname(dir)):
