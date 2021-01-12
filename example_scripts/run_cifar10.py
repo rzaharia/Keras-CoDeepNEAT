@@ -142,10 +142,11 @@ def run_cifar10_full(generations,
     population.create_blueprint_species(n_blueprint_species)
 
     # Iterate generating, fitting, scoring, speciating, reproducing and mutating.
-    conf = SparkConf().setMaster("local")\
+    conf = SparkConf().setMaster("yarn")\
                       .setAppName("My App")\
-                      .set("spark.driver.memory", "60g")\
-                      .set("spark.driver.maxResultSize", "60g")
+                    .set('spark.executor.instances', '3') \
+                      .set("spark.driver.memory", "50g")\
+                      .set("spark.driver.maxResultSize", "50g")
 
     sc = SparkContext(conf=conf)
     iteration = population.iterate_generations(generations=generations,
@@ -202,16 +203,16 @@ if __name__ == "__main__":
         SAMPLE_SIZE = 20000
         TEST_SAMPLE_SIZE = 2000
     elif hyperparameters_set == 'our_CoDeepNEAT':
-        generations = 2#72
-        training_epochs = 1 #5
-        final_model_training_epochs = 3#00
-        population_size = 2#0
+        generations = 72
+        training_epochs = 4
+        final_model_training_epochs = 300
+        population_size = 15
         blueprint_population_size = 15
-        module_population_size = 35
+        module_population_size = 30
         n_blueprint_species = 3
         n_module_species = 3
-        SAMPLE_SIZE = 200#00
-        TEST_SAMPLE_SIZE = 20#00
+        SAMPLE_SIZE = 20000
+        TEST_SAMPLE_SIZE = 2000
 
     def create_dir(dir):
         if not os.path.exists(os.path.dirname(dir)):

@@ -142,7 +142,7 @@ def run_mnist_full(generations, training_epochs, population_size, blueprint_popu
     population.create_blueprint_species(n_blueprint_species)
 
     # Iterate generating, fitting, scoring, speciating, reproducing and mutating.
-    conf = SparkConf().setMaster("local").setAppName("My App").\
+    conf = SparkConf().setMaster("yarn").setAppName("My App").\
         set("spark.driver.memory", "15g").set("spark.driver.maxResultSize", "15g")
     sc = SparkContext(conf=conf)
     iteration = population.iterate_generations(generations=generations,
@@ -175,12 +175,12 @@ def run_mnist_full(generations, training_epochs, population_size, blueprint_popu
 
 
 def main():
-    generations = 3
+    generations = 1
     training_epochs = 1
-    final_model_training_epochs = 2
+    final_model_training_epochs = 1
     population_size = 3
-    blueprint_population_size = 10
-    module_population_size = 30
+    blueprint_population_size = 5
+    module_population_size = 5
     n_blueprint_species = 3
     n_module_species = 3
 
